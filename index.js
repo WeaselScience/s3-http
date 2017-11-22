@@ -4,7 +4,7 @@ const path = require('path');
 
 const app = express();
 
-const getItem = (path) => new Promise((resolve, reject) => {
+const getItem = (path, head = false) => new Promise((resolve, reject) => {
     const pathParts = path.split('');
 
     let getPath;
@@ -15,7 +15,7 @@ const getItem = (path) => new Promise((resolve, reject) => {
         getPath = path;
     }
 
-    s3.getObject({
+    s3[head ? 'headObject' : 'getObject']({
         Bucket: process.env.BUCKET,
         Key: getPath
     }, (error, res) => error ? reject(error) : resolve(res));
@@ -26,30 +26,24 @@ const s3 = new AWS.S3({
 });
 
 app.get('*', async (req, res) => {
-    let reqPath = req.path;
+    let reqPath = decodeURIComponent(req.path);
 
-    let item;
-    
     try {
-        item = await getItem(reqPath);
-    } catch (error) {
-        // Base request path not found
-    }
-    
-    if (!item) {
-        const indexPath = path.join(reqPath, 'index.html');
-        
-        try {
-            item = await getItem(indexPath);
-        } catch (error) {
-            // Index is not found either
-        }
-    }
-    
-    if (!item) {
-        res.status(404).end();
-    } else {
+        const item = await getItem(reqPath);
+
         res.type(item.ContentType).end(item.Body);
+    } catch (error) {
+        try {
+            const indexPath = path.join(reqPath, 'index.html');
+
+            if (await getItem(indexPath, true)) {
+                res.redirect(indexPath);
+            } else {
+                res.status(404).end();
+            }
+        } catch (indexError) {
+            res.status(400).end();
+        }
     }
 });
 
